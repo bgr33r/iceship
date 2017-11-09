@@ -1,0 +1,166 @@
+#Keras Run 19
+#by bgr33r
+
+#import packages for data read
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+
+#set batch size and epochs (these are located at top of page for ease of search for model training
+batch_size=32
+epochs = 1000
+
+#load the data from the train and test .json files
+def load_data():
+    train = pd.read_json('./data/train.json')
+    test = pd.read_json('./data/test.json')
+    #Fill 'na' angles with zero
+    train.inc_angle = train.inc_angle.replace('na', 0)
+    train.inc_angle = train.inc_angle.astype(float).fillna(0.0)
+    test.inc_angle = test.inc_angle.replace('na', 0)
+    test.inc_angle = test.inc_angle.astype(float).fillna(0.0)
+    return train, test, train.inc_angle, test.inc_angle
+
+train, test, train.inc_angle, test.inc_angle = load_data()
+
+
+#The below function reads in the raw bands from the SAR data, converts them to 2D arrays, rescales the data using maximums
+#and minimums
+def process_images(df):
+    X_band1 = np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in df["band_1"]])
+    X_band2 = np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in df["band_2"]])
+    # rescale band 1 and 2 to max and min
+    X_band1 = (X_band1 - np.asarray(X_band1).min())/(np.asarray(X_band1).max()-np.asarray(X_band1).min())
+    X_band2 = (X_band1 - np.asarray(X_band2).min())/(np.asarray(X_band2).max()-np.asarray(X_band2).min())
+
+
+    # Merge bands and add another band as the mean of Band 1 and Band 2 (useful for the ImageDataGenerator later)
+    imgs = np.concatenate([X_band1[:, :, :, np.newaxis]
+                            , X_band2[:, :, :, np.newaxis]
+                            ,((X_band1+X_band2)/2)[:, :, :, np.newaxis]], axis=-1)
+    return imgs
+
+#create the training and testing data, along with validation data for model and validation inputs
+X_train = process_images(train)
+X_test = process_images(test)
+y_train = np.array(train["is_iceberg"])
+
+#because the SAR data are collected from difference incidence angles, I have included a correction for this angle
+#using the below function that multiplies the scaled data (intensities between 0 and 1)*the cosine of incidence
+def angle_correct(data,angle):
+    outarray = np.empty(shape=data.shape)
+    for i, image in enumerate(angle):
+        outarray[i] = data[i] * np.cos(int(angle[i]))
+    return outarray
+
+#correct training and testing data for incidence angle
+X_train = angle_correct(X_train,train.inc_angle)
+X_test = angle_correct(X_test,train.inc_angle)
+
+#Create a train and validation split, 75% of data used in training
+from sklearn.model_selection import train_test_split
+
+X_train, X_valid, y_train, y_valid = train_test_split(X_train,
+                                    y_train, random_state=666, train_size=0.75) #TODO change random_state to random number with seed = np.random.randint(low=10,high=100000)
+
+##Now lets create the empty model
+#I am training in steps where each convolution group is first trained. Then weights are saved. Then the next step is added
+#and then the weights are loaded from the prevoius training. This is repeated until all convolutions are trained. Any
+#or each of these steps can be skipped by removing the "#" from a section. I've just pasted in the raw version here
+#for you to start training
+
+from keras.models import Model, Sequential
+from keras.layers import Input, Dense, Conv2D, Flatten, MaxPooling2D, Activation, BatchNormalization,GlobalMaxPooling2D
+from keras.layers import Dropout
+from keras import optimizers
+
+def simple_cnn():
+    model = Sequential(name='Seq_0')
+    model.add(BatchNormalization(input_shape=(75, 75, 3),name = 'BatchNormal_0'))
+    model.add(Conv2D(5, (3, 3), name='Cov_1_1'))
+    model.add(Conv2D(5, (3, 3),name='Cov_1_2'))
+    model.add(Conv2D(5, (3, 3),name='Cov_1_3'))
+    model.add(MaxPooling2D(pool_size=(2, 2),name='MaxPool2D_1'))
+
+    #model.add(Conv2D(10, (3, 3),name='Cov_2_1'))
+    #model.add(Conv2D(10, (3, 3),name='Cov_2_2'))
+    #model.add(Conv2D(10, (3, 3),name='Cov_2_3'))
+    #model.add(MaxPooling2D(pool_size=(2, 2),name='MaxPool2D_2'))
+
+    #model.add(Conv2D(20, (3, 3),name='Cov_3_1'))
+    #model.add(Conv2D(20, (3, 3),name='Cov_3_2'))
+    #model.add(Conv2D(20, (3, 3),name='Cov_3_3'))
+    #model.add(MaxPooling2D(pool_size=(2, 2),name='MaxPool2D_3'))
+
+    #model.add(Conv2D(40, (3, 3),name='Cov_4_1'))
+    #model.add(Conv2D(40, (3, 3),name='Cov_4_2'))
+    #model.add(Conv2D(40, (3, 3),name='Cov_4_3'))
+    #model.add(MaxPooling2D(pool_size=(2, 2),name='MaxPool2D_4'))
+
+    #model.add(Conv2D(80, (3, 3),name='Cov_5_1'))
+    #model.add(Conv2D(80, (3, 3),name='Cov_5_2'))
+    #model.add(Conv2D(80, (3, 3),name='Cov_5_3'))
+    #model.add(MaxPooling2D(pool_size=(2, 2),name='MaxPool2D_5'))
+
+    model.add(GlobalMaxPooling2D(name='GlobalMax_1'))  ######UPDATE NAME DURING BUILD/training
+    model.add(Dense(72,name='Dense_1', activation='relu')) ######UPDATE NAME DURING BUILD/training
+    model.add(Dense(1,name='Dense_out', activation='sigmoid'))
+
+    learning_rate = 0.001
+    decay_rate = learning_rate / epochs
+    momentum = 0.9
+    Adam = optimizers.Adam(lr=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=decay_rate)
+    #sgd = optimizers.sgd(lr=learning_rate, momentum=momentum, decay=decay_rate, nesterov=True) #this is here for SGD
+    model.compile(optimizer=Adam, loss = 'binary_crossentropy', metrics = ['accuracy'])
+    #model.load_weights('./checkpoints/UPDATETHIS.hdf5', by_name=True) #turn this on when working through steps
+    return model
+
+#Create Basic ImageDataGenerator
+from keras.preprocessing.image import ImageDataGenerator
+
+# Define the image transformations here
+gen = ImageDataGenerator(horizontal_flip = True,
+                         vertical_flip = True,
+                         width_shift_range = 0.1,
+                         height_shift_range = 0.1,
+                         zoom_range = 0.1,
+                         rotation_range = 40)
+
+# Create generator
+#seed = np.random.randint(low=10,high=100000)
+gen_flow = gen.flow(X_train, y_train, batch_size=batch_size)
+#for troubleshooting image processing try adding the below line to flow:
+#, seed=seed, save_to_dir = './data/images', save_prefix = "tv_bregman", save_format = 'png'
+
+
+##Fit model
+
+#But first, create Model Checkpointer
+from keras.callbacks import ModelCheckpoint,TensorBoard
+checkpointer = ModelCheckpoint(filepath='./checkpoints/weights.hdf5', verbose=1, save_best_only=True)
+
+#and set up tensorboard
+#Run tensorboard
+tbCallBack = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=batch_size, write_graph=True, write_grads=False,
+                            write_images=False, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None)
+
+# Fit the model using our generator defined above
+model = simple_cnn()
+model.fit_generator(gen_flow, validation_data=(X_valid, y_valid),
+                    steps_per_epoch=len(X_train) / batch_size,
+                    epochs=epochs,callbacks=[checkpointer,tbCallBack],
+                    shuffle=True) #you can turn shuffle off or on - I have it here because I have been overfitting models
+
+
+#After model has been trained, create predictions using validation data
+# Predict on test data
+#load best weights
+model.load_weights('./checkpoints/weights.hdf5')
+test_predictions = model.predict(X_test)
+
+# Create .csv
+pred_df = test[['id']].copy()
+pred_df['is_iceberg'] = test_predictions
+pred_df.to_csv('predictions.csv', index = False)
+#pred_df.sample(3)
+
+#all done
