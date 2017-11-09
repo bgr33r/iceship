@@ -91,16 +91,6 @@ def simple_cnn():
     #model.add(Conv2D(20, (3, 3),name='Cov_3_3'))
     #model.add(MaxPooling2D(pool_size=(2, 2),name='MaxPool2D_3'))
 
-    #model.add(Conv2D(40, (3, 3),name='Cov_4_1'))
-    #model.add(Conv2D(40, (3, 3),name='Cov_4_2'))
-    #model.add(Conv2D(40, (3, 3),name='Cov_4_3'))
-    #model.add(MaxPooling2D(pool_size=(2, 2),name='MaxPool2D_4'))
-
-    #model.add(Conv2D(80, (3, 3),name='Cov_5_1'))
-    #model.add(Conv2D(80, (3, 3),name='Cov_5_2'))
-    #model.add(Conv2D(80, (3, 3),name='Cov_5_3'))
-    #model.add(MaxPooling2D(pool_size=(2, 2),name='MaxPool2D_5'))
-
     model.add(GlobalMaxPooling2D(name='GlobalMax_1'))  ######UPDATE NAME DURING BUILD/training
     model.add(Dense(72,name='Dense_1', activation='relu')) ######UPDATE NAME DURING BUILD/training
     model.add(Dense(1,name='Dense_out', activation='sigmoid'))
